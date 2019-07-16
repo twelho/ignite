@@ -2,10 +2,10 @@ package vmmd
 
 import (
 	"fmt"
+	"github.com/weaveworks/ignite/pkg/apis/ignite/scheme"
 	"path"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/ignite/pkg/apis/ignite/scheme"
 	api "github.com/weaveworks/ignite/pkg/apis/ignite/v1alpha1"
 	meta "github.com/weaveworks/ignite/pkg/apis/meta/v1alpha1"
 	"github.com/weaveworks/ignite/pkg/client"
@@ -25,6 +25,7 @@ type VM struct {
 
 var _ metadata.Metadata = &VM{}
 
+// TODO: Remove duplicate code in these three generators
 // WrapVM wraps an API type in the runtime object
 // It does not do any validation or checking like
 // NewVM, hence it should only be used for "safe"
@@ -33,12 +34,32 @@ func WrapVM(obj *api.VM) *VM {
 	// Run the object through defaulting, just to be sure it has all the values
 	scheme.Scheme.Default(obj)
 
+	// Construct the runtime object
 	vm := &VM{
 		VM: obj,
 		c:  client.DefaultClient,
 	}
 
 	return vm
+}
+
+// SafeWrapVM validates the common metadata of
+// the VM, ensuring it's defaulted and has a name
+// and UID. It doesn't however validate any VM
+// specific data like NewVM does.
+func SafeWrapVM(obj *api.VM) (*VM, error) {
+	// Initialize UID, name, defaulting, etc. that is common for all kinds
+	if err := metadata.InitObject(obj, nil); err != nil {
+		return nil, err
+	}
+
+	// Construct the runtime object
+	vm := &VM{
+		VM: obj,
+		c:  client.DefaultClient,
+	}
+
+	return vm, nil
 }
 
 func NewVM(obj *api.VM, c *client.Client) (*VM, error) {

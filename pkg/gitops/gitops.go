@@ -40,12 +40,14 @@ func RunLoop(url, branch string) error {
 		log.Println("Waiting for updates in the Git repo...")
 		diff := s.WaitForUpdate()
 
+		fmt.Println("list VMs")
 		list, err := c.VMs().List()
 		if err != nil {
 			log.Warnf("Listing VMs returned an error: %v. Retrying...", err)
 			continue
 		}
 
+		fmt.Println("map VMs")
 		vmMap = mapVMs(list)
 
 		wg := &sync.WaitGroup{}
@@ -74,7 +76,10 @@ func RunLoop(url, branch string) error {
 			// TODO: Consider cleanup like this?
 			//defer metadata.Cleanup(runVM, false) // TODO: Handle silent
 			//return metadata.Success(runVM)
-			runVM := vmmd.WrapVM(vm)
+			runVM, err := vmmd.SafeWrapVM(vm)
+			if err != nil {
+				return err
+			}
 
 			// TODO: At the moment there aren't running in parallel, shall they?
 			switch file.Type {
