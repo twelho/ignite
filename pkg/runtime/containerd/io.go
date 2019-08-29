@@ -1,9 +1,12 @@
 package containerd
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
+	"syscall"
+	"time"
 
 	"github.com/containerd/containerd/cio"
 	"github.com/weaveworks/ignite/pkg/util"
@@ -184,6 +187,102 @@ func newlogRetriever(logFile string) (l *logRetriever, err error) {
 }
 
 var _ io.ReadCloser = &logRetriever{}
+
+type fakeIO struct {
+	config cio.Config
+}
+
+func (f *fakeIO) Config() cio.Config {
+	return f.config
+}
+
+func (f *fakeIO) Cancel() {}
+
+func (f *fakeIO) Wait() {}
+
+func (f *fakeIO) Close() error { return nil }
+
+func (l *logRetriever) Attach() cio.Attach {
+	return func(fifos *cio.FIFOSet) (i cio.IO, err error) {
+		time.Sleep(time.Second)
+
+		var stdout io.ReadCloser
+		stdout, err = os.Open(fifos.Stdout)
+		if err != nil {
+			return
+		}
+		defer util.DeferErr(&err, stdout.Close)
+
+		async, ok := stdout.(syscall.Conn)
+		if !ok {
+			err = fmt.Errorf("cannot cast to syscall.Conn")
+			return
+		}
+
+		sc, err := async.SyscallConn()
+		if err != nil {
+			return
+		}
+
+		if err = sc.Control(func(_ uintptr) {}); err != nil {
+			return
+		}
+
+		//if err = syscall.SetNonblock(int(stdout.Fd()), true); err != nil {
+		//	return
+		//}
+
+		if err = syscall.SetNonblock(int(os.Stdout.Fd()), true); err != nil {
+			return
+		}
+
+		buf := bufio.NewReader(stdout)
+
+		fmt.Println(buf.Buffered())
+
+		for {
+			//fmt.Println("Read")
+			if _, err = io.CopyN(os.Stdout, buf, int64(buf.Buffered())); err == io.EOF {
+				break
+			} else if err != nil {
+				return
+			}
+		}
+		//buf := make([]byte, 100)
+		//_, _ = io.ReadFull(stdout, buf)
+		//io.
+
+		//fi, err := stdout.Stat()
+		//fmt.Println("STDOUT SIZE:", fi.Size(), err)
+		//fmt.Println(string(buf))
+
+		return &fakeIO{fifos.Config}, nil
+	}
+}
+
+func (l *logRetriever) Ready(io cio.IO) error {
+	waitPipes := []string{io.Config().Stdout, io.Config().Stderr}
+
+	for {
+		var size int64
+		for _, pipe := range waitPipes {
+			fi, err := os.Stat(pipe)
+			if err != nil {
+				return err
+			}
+
+			fmt.Println("File:", pipe)
+			fmt.Println("Size:", fi.Size())
+			size += fi.Size()
+		}
+
+		if size == 0 {
+			break
+		}
+	}
+
+	return l.writer.Close()
+}
 
 func (l *logRetriever) Opt() cio.Opt {
 	return cio.WithStreams(&dummyReader{}, l.output, l.output)
